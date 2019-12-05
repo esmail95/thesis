@@ -113,5 +113,36 @@ if __name__ == "__main__":
     ufile << u
     pfile << p
     
+    # save results
+    def eval_cb(j, eps):
+        eps_viz.assign(eps)
+        PorosityField << eps_viz
+        # w_viz.assign(w)
+        # ForwardStates << w_viz
+        with open("results_dens_geometry/Results.csv", mode='a') as employee_file:
+            employee_writer = csv.writer(employee_file,delimiter=',',quotechar='"',quoting=csv.QUOTE_MINIMAL)
+            employee_writer.writerow([j,assemble(eps*Constant(1)*dx)])   
+    def derivative_cb(j, dj, eps):
+        dj_viz.assign(dj)
+        Sensitivity << dj_viz
+
+    J = assemble(inner(alpha(eps) * u, u) * dx + mu * inner(grad(u), grad(u)) * dx)
+    m = Control(eps)
+    Jhat = ReducedFunctional(J, m, eval_cb_post=eval_cb, derivative_cb_post=derivative_cb)
+
+     # define control constraints
+        # bound constraints
+    lb = 0.0
+    ub = 1.0
+        # volume constraints
+    volume_constraint = UFLInequalityConstraint((V/delta - eps)*dx, m)
+
+    # solve the optimisation problem with q = 0.1
+    problem = MinimizationProblem(Jhat, bounds=(lb, ub), constraints=volume_constraint)
+    parameters = {'maximum_iterations': 250}
+
+    solver = IPOPTSolver(problem, parameters=parameters)
+    eps_opt = solver.solve()
+    
     
    
