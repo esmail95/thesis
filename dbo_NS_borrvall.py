@@ -55,23 +55,24 @@ class InflowOutflow(UserExpression):
         return (2,)
 
 
-def forward(rho):
-    w = Function(W)
-    (u, p) = TrialFunctions(W)
-    (v, q) = TestFunctions(W)
-    # Stokes equation
-    F = (alpha(rho) * inner(u, v) * dx + inner(grad(u), grad(v)) * dx + inner(grad(p), v) * dx + inner(div(u), q) * dx)
-    bc = DirichletBC(W.sub(0), InflowOutflow(degree=1), "on_boundary")
-    solve(lhs(F) == rhs(F), w, bc)
-    return w
+# def forward(rho):
+#     w = Function(W)
+#     (u, p) = TrialFunctions(W)
+#     (v, q) = TestFunctions(W)
+#     # Stokes equation
+#     F = (alpha(rho) * inner(u, v) * dx + inner(grad(u), grad(v)) * dx + inner(grad(p), v) * dx + inner(div(u), q) * dx)
+#     bc = DirichletBC(W.sub(0), InflowOutflow(degree=1), "on_boundary")
+#     solve(lhs(F) == rhs(F), w, bc)
+#     return w
 def solve_navier_stokes(W, nu, bcs):
     # Define variational forms
     w = Function(W)
     v, q = TestFunctions(W)
     u, p = split(w)
-    F = (alpha(rho) * inner(u, v)* dx + inner(grad(u), grad(v))*dx + Re*inner(v, dot(grad(u),u))*dx - p*div(v)*dx - q*div(u)*dx)
+    F = (alpha(rho) * inner(u, v)* dx + inner(grad(u), grad(v))*dx + Re*inner(v, dot(grad(u),u))*dx - Re*p*div(v)*dx - q*div(u)*dx)
     # Solve the problem
     solve(F == 0, w, bcs)
+    u, p = w.split()
     uFile.write(u)
     pFile.write(p)
     return w
@@ -80,12 +81,12 @@ if __name__ == "__main__":
     rho = interpolate(Constant(float(V)/delta), A)
     bc = DirichletBC(W.sub(0), InflowOutflow(degree=1), "on_boundary")
 # Solve forward
-    w = forward(rho)
-    u, p = w.split()
+    # w = forward(rho)
+    # u, p = w.split()
 # Store to file    
     # Solve Navier-Stokes
     w = solve_navier_stokes(W, nu, bcs=bc)
-    u, p = w.split()
+    
 
 # Saving parameters
     controls = File("output/control_iterations_guess.pvd")
@@ -140,11 +141,11 @@ if __name__ == "__main__":
 
     J = assemble(inner(alpha(rho) * u, u) * dx + mu * inner(grad(u), grad(u)) * dx)
     m = Control(rho)
-    Jhat = ReducedFunctional(J, m, eval_cb_post=eval_cb)
-    
+    Jhat = ReducedFunctional(J, m, eval_cb_post=eval_cb, derivative_cb_post=derivative_cb)
+
 # Optimization problem starting with q = 0.1
-    problem = MinimizationProblem(Jhat, bounds=(lb, ub), constraints=volume_constraint, derivative_cb_post=derivative_cb)
-    parameters = {'maximum_iterations': 200}
+    problem = MinimizationProblem(Jhat, bounds=(lb, ub), constraints=volume_constraint)
+    parameters = {'maximum_iterations': 350}
     solver = IPOPTSolver(problem, parameters=parameters)
     rho_opt = solver.solve()
     rho_opt_final = XDMFFile(MPI.comm_world,  "output/control_solution_final.xdmf")
