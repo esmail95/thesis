@@ -23,16 +23,17 @@ except ImportError:
 # turn off redundant output in parallel
 parameters["std_out_all_processes"] = False
 
-if os.path.isdir('output'):
-    shutil.rmtree('output')
-t0 = time.process_time()
+if os.path.isdir('output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init'): 
+    shutil.rmtree('output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init')
+t0 = time.time()
 # Next we define some constants, and define the inverse permeability as
 # a function of :math:`\rho`.
 
-mu = Constant(1./150.)                   # viscosity
+mu = Constant(1./50.)                   # viscosity
 alphaunderbar = 2.5 * mu / (100**2)  # parameter for \alpha
 alphabar = 2.5 * mu / (0.01**2)      # parameter for \alpha
 q = Constant(0.01) # q value that controls difficulty/discrete-valuedness of solution
+h = 0.1
 
 def alpha(rho):
     """Inverse permeability as a function of rho, equation (40)"""
@@ -55,11 +56,11 @@ U_h = VectorElement("CG", mesh.ufl_cell(), 2)
 P_h = FiniteElement("CG", mesh.ufl_cell(), 1)
 W = FunctionSpace(mesh, U_h*P_h)          # mixed Taylor-Hood function space
 
-uFile = File(mesh.mpi_comm(),"output/u.pvd")
-Gradient = File('output/Gradient.pvd')
+uFile = File(mesh.mpi_comm(),"output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/u.pvd")
+Gradient = File('output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/Gradient.pvd')
 dj_viz = Function(A, name="Gradient")
 
-pFile = File(mesh.mpi_comm(),"output/p.pvd")
+pFile = File(mesh.mpi_comm(),"output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/p.pvd")
 
 # Define the boundary condition on velocity
 class PinPoint(SubDomain):
@@ -107,12 +108,13 @@ def forward(rho):
     u, p = split(w)
     test = TestFunction(W)
     v, q = split(test)
+    Re = Constant(2.0)
 
-    F = (alpha(rho) * inner(u, v) * dx + mu*inner(grad(u), grad(v)) * dx + inner(dot(grad(u), u), v)*dx +\
-         inner(grad(p), v) * dx  + inner(div(u), q) * dx) 
+    F = (alpha(rho) * inner(u, v) * dx + mu*inner(grad(u), grad(v)) * dx  + Re*inner(dot(grad(u), u), v)*dx +  inner(grad(p),v)* dx  + inner(div(u), q) * dx) #+ Re*inner(dot(grad(u), u), v)*dx 
+          
     bc1 = DirichletBC(W.sub(0), InflowOutflow(degree=1), 'on_boundary')
     bc2 = DirichletBC(W.sub(1), 0.0, PinPoint(), 'pointwise')
-    bcs = [bc1,bc2]
+    bcs = [bc1] #bc2
     solve(F == 0, w, bcs=bcs)
 
     (u, p) = w.split(True)
@@ -131,6 +133,9 @@ if __name__ == "__main__":
     rho = Function(A)
     hdf5file=HDF5File(mesh.mpi_comm(), 'finalporosity.h5', 'r')
     hdf5file.read(rho, '/porosity')
+    # rho = interpolate(heaviside.approx_heaviside_interpolate(interpolate(\
+    #         Expression('peakwidth*fabs(distance-pow(pow((2*x[1] - center),2),0.5)) + height',\
+    #         degree=2,peakwidth=-1.2, distance=0.5, center=1, height=0.2), A), h), A)
     w   = forward(rho)
     (u, p) = split(w)
    
@@ -147,13 +152,20 @@ if __name__ == "__main__":
 # an initial guess for the main task (:math:`q=0.1`), we shall save
 # these iterates in ``output/control_iterations_guess.pvd``.
 
-    controls = File("output/control_iterations_guess.pvd")
-    allctrls = File("output/allcontrols.pvd")
+    controls = File("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/control_iterations_guess.pvd")
+    allctrls = File("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/allcontrols.pvd")
     rho_viz = Function(A, name="ControlVisualisation")
     def eval_cb(j, rho):
         rho_viz.assign(rho)
         controls << rho_viz
         allctrls << rho_viz
+        with open("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/Objective.csv", mode='a') as employee_file:
+            employee_writer = csv.writer(employee_file,delimiter=',',quotechar='"',quoting=csv.QUOTE_MINIMAL)
+            employee_writer.writerow([j])  
+        
+        with open("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/Fluid volume.csv", mode='a') as employee_file:
+            employee_writer = csv.writer(employee_file,delimiter=',',quotechar='"',quoting=csv.QUOTE_MINIMAL)
+            employee_writer.writerow([assemble(rho*Constant(1)*dx)]) 
     def derivative_cb(j, dj, rho):
         dj_viz.assign(dj)
         Gradient << dj_viz
@@ -161,7 +173,7 @@ if __name__ == "__main__":
 # Now we define the functional and :doc:`reduced functional
 # <../maths/2-problem>`:
 
-    J = assemble( inner(alpha(rho) * u, u) * dx + mu * inner(grad(u), grad(u)) * dx)
+    J = assemble(inner(1.6*alpha(rho) * u, u) * dx +mu * inner(grad(u), grad(u)) * dx)
     m = Control(rho)
     Jhat = ReducedFunctional(J, m, eval_cb_post=eval_cb,derivative_cb_post=derivative_cb)
 
@@ -189,7 +201,7 @@ if __name__ == "__main__":
     solver = IPOPTSolver(problem, parameters=parameters)
     rho_opt = solver.solve()
 
-    rho_opt_xdmf = XDMFFile(MPI.comm_world, "output/control_solution_guess.xdmf")
+    rho_opt_xdmf = XDMFFile(MPI.comm_world, "output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/control_solution_guess.xdmf")
     rho_opt_xdmf.write(rho_opt)
 
 # With the optimised value for :math:`q=0.01` in hand, we *reset* the
@@ -197,7 +209,7 @@ if __name__ == "__main__":
 # we want to solve. We need to update the values of :math:`q` and
 # :math:`\rho`:
 
-    q.assign(0.1)
+    q.assign(0.1)#0.1
     rho.assign(rho_opt)
     set_working_tape(Tape())
 
@@ -215,17 +227,24 @@ if __name__ == "__main__":
     (u, p) = split(w)
 
     # Define the reduced functionals
-    controls = File("output/control_iterations_final.pvd")
+    controls = File("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/control_iterations_final.pvd")
     rho_viz = Function(A, name="ControlVisualisation")
     def eval_cb(j, rho):
         rho_viz.assign(rho)
         controls << rho_viz
         allctrls << rho_viz
+        with open("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/Objective.csv", mode='a') as employee_file:
+            employee_writer = csv.writer(employee_file,delimiter=',',quotechar='"',quoting=csv.QUOTE_MINIMAL)
+            employee_writer.writerow([j])  
+        
+        with open("output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/Fluid volume.csv", mode='a') as employee_file:
+            employee_writer = csv.writer(employee_file,delimiter=',',quotechar='"',quoting=csv.QUOTE_MINIMAL)
+            employee_writer.writerow([assemble(rho*Constant(1)*dx)]) 
     def derivative_cb(j, dj, rho):
         dj_viz.assign(dj)
         Gradient << dj_viz
 
-    J = assemble(inner(alpha(rho) * u, u) * dx + mu * inner(grad(u), grad(u)) * dx)
+    J = assemble(1.6*inner(alpha(rho) * u, u) * dx + mu * inner(grad(u), grad(u)) * dx)
     m = Control(rho)
     Jhat = ReducedFunctional(J, m, eval_cb_post=eval_cb,derivative_cb_post=derivative_cb)
 
@@ -233,21 +252,19 @@ if __name__ == "__main__":
 # from the solution of :math:`q=0.01`:
 
     problem = MinimizationProblem(Jhat, bounds=(lb, ub), constraints=volume_constraint)
-    parameters = {'maximum_iterations': 350}
+    parameters = {'maximum_iterations': 230}
 
     solver = IPOPTSolver(problem, parameters=parameters)
     rho_opt = solver.solve()
 
-    rho_opt_final = XDMFFile(MPI.comm_world, "output/control_solution_final.xdmf")
+    rho_opt_final = XDMFFile(MPI.comm_world, "output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/control_solution_final.xdmf")
     rho_opt_final.write(rho_opt)
 
 
-t1 = time.process_time()
-with open('output/Time.csv', mode='a') as employee_file:
+t1 = time.time()
+with open('output_mu=50_Re=2_1.6alpha_gradu_q=0.01_till_it=20_then_q=0.1_intermediate_init/Time.csv', mode='a') as employee_file:
     employee_writer = csv.writer(employee_file,delimiter=',',quotechar='"',quoting=csv.QUOTE_MINIMAL)
     employee_writer.writerow([t1-t0])
 # hdf5file=HDF5File(mesh.mpi_comm(), 'finalporosity.h5', 'w')
 # hdf5file.flush()
 # hdf5file.write(rho, '/porosity')
-
-
